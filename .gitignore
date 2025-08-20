@@ -1,2 +1,6 @@
 Docker/
+!Docker/Dockerfile
+
 detectron2/
+
+.DS_Store
