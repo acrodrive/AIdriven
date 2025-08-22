@@ -59,17 +59,34 @@ WORKDIR /home/appuser/AIdriven
 # ---- Sanity check ------------------------------------------------------------
 CMD ["/bin/bash"]
 
+
+# 도커 이미지 생성 및 컨테이너 생성
+# docker build -t aidriven:v0 .
+# docker run -it --gpus all --name cruise aidriven:v0
+
+# 컨테이너를 한 번 생성하고 나면 그 뒤로는 컨테이너를 또 생성할 필요 없이 껐다/켰다 하기
+# docker start cruise (백그라운드에서 돔, 백그라운드에서 돌리다가 필요에 따라 터미널에 접근할 수는 있음)
+# docker start -ai cruise (터미널로 들어감)
+# docker stop cruise
+
+# 주의사항
 # demo.py의 17번 째줄의 from vision.fair.detectron2.demo.predictor import VisualizationDemo는
 # 페이스북 내부 경로에서 네임스페이스를 사용하던 흔적이고
 # 원래는 아래와 같이 가져와야 한다.
 # from predictor import VisualizationDemo
 
-# docker build -t aidriven:v0 .
-# docker run -it --gpus all --name cruise aidriven:v0
-
+# 실행 방법
 # python3 demo/demo.py \
 #   --config-file configs/COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml \
 #   --input demo/test_images/* \
 #   --output demo/test_output \
 #   --confidence-threshold 0.5 \
 #   --opts MODEL.WEIGHTS demo/faster_rcnn_R_50_FPN_3x.pkl
+
+# 데이터 다운로드 방법
+# zod download -y \
+#   --url "https://www.dropbox.com/scl/fo/q81qqpiqygaeys7mppgoe/AFuqa-QrSkGzHmnkhhpvbBE?rlkey=ocr9n0gq3u083zj8sn1yo1ak6&e=1&dl=0" \
+#   --subset frames \
+#   --version full \
+#   --output-dir /home/appuser/zoddata \
+#   --no-lidar --no-oxts --no-vehicle-data

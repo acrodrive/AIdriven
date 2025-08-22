@@ -1,0 +1,54 @@
+# Cruise/configs/zod/zod_config.yaml
+# ZOD_ROOT: /data/ZOD/frames
+# ZOD_VERSION: mini
+MODEL:
+  META_ARCHITECTURE: "GeneralizedRCNN"
+  WEIGHTS: ""   # 트레이너에서 model_zoo URL 또는 로컬 pkl 지정
+  BACKBONE:
+    NAME: "build_resnet_fpn_backbone"
+  RESNETS:
+    DEPTH: 50
+    OUT_FEATURES: ["res2", "res3", "res4", "res5"]   # ★ 필수: FPN 입력 피처
+  FPN:
+    IN_FEATURES: ["res2", "res3", "res4", "res5"]    # ★ FPN이 백본에서 받는 피처
+  PROPOSAL_GENERATOR:
+    NAME: "RPN"
+  RPN:
+    IN_FEATURES: ["p2", "p3", "p4", "p5"]            # ★ FPN 출력 피처를 RPN에 사용
+  ANCHOR_GENERATOR:
+    SIZES: [[32], [64], [128], [256]]                # 레벨(p2~p5) 수와 맞춤
+    ASPECT_RATIOS: [[0.5, 1.0, 2.0]]
+
+  ROI_HEADS:
+    NAME: "ROIHeads3D"        # ← 커스텀 ROIHeads
+    NUM_CLASSES: 3            # Car / Pedestrian / Cyclist
+    IN_FEATURES: ["p2", "p3", "p4", "p5"]
+  ROI_BOX_HEAD:
+    NAME: "FastRCNNConvFCHead"
+    NUM_FC: 2
+    POOLER_RESOLUTION: 7
+    POOLER_SAMPLING_RATIO: 0
+    POOLER_TYPE: "ROIAlignV2"
+    CONV_DIM: 256
+    FC_DIM: 1024
+    NORM: ""
+
+DATASETS:
+  TRAIN: ("zod3d_train",)
+  TEST: ("zod3d_val",)
+
+DATALOADER:
+  NUM_WORKERS: 4
+
+SOLVER:
+  IMS_PER_BATCH: 4
+  BASE_LR: 0.0025
+  STEPS: (6000, 8000)
+  MAX_ITER: 9000
+  WARMUP_ITERS: 1000
+  CHECKPOINT_PERIOD: 1000
+
+INPUT:
+  FORMAT: "BGR"
+
+OUTPUT_DIR: "Cruise/checkpoint/zod3d_r50fpn"

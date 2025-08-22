@@ -5,11 +5,11 @@ from detectron2 import model_zoo
 from detectron2.data import build_detection_train_loader, build_detection_test_loader
 
 # 데이터셋 등록/매퍼
-from datasets.zod_register import register_all_zod
-from datasets.zod_mapper_3d import ZOD3DMapper
+from Cruise.datasets.zod.zod_register import register_all_zod
+from Cruise.datasets.zod.zod_mapper_3d import ZOD3DMapper
 
 # ROIHeads3D 등록(임포트만 해도 registry에 등록)
-from modeling.roi_heads.roi_heads_3d import ROIHeads3D  # noqa: F401
+from Cruise.model.head.roi_heads_3d import ROIHeads3D  # noqa: F401
 
 class ZOD3DTrainer(DefaultTrainer):
     @classmethod
@@ -21,7 +21,7 @@ class ZOD3DTrainer(DefaultTrainer):
 
 def setup(args):
     cfg = get_cfg()
-    cfg.merge_from_file("zod_config.yaml")
+    cfg.merge_from_file("Cruise/configs/zod/zod_config.yaml")
     # COCO R50-FPN 3x 가중치 초기화
     if args.weights and os.path.exists(args.weights):
         cfg.MODEL.WEIGHTS = args.weights
@@ -37,7 +37,7 @@ def setup(args):
 
 def main(args):
     # ZOD frames 루트 지정
-    register_all_zod(zod_root="/datasets/ZOD/frames")
+    register_all_zod(zod_root="/home/appuser/AIdriven/Cruise/datasets/zod/zoddata/single_frames", version="mini")
     cfg = setup(args)
     trainer = ZOD3DTrainer(cfg)
     trainer.resume_or_load(resume=False)
@@ -49,6 +49,7 @@ if __name__ == "__main__":
     parser.add_argument("--ims-per-batch", type=int, default=0)
     parser.add_argument("--base-lr", type=float, default=0.0)
     parser.add_argument("--output", type=str, default="")
+    
     args = parser.parse_args()
     launch(main, args.num_gpus or 1, num_machines=args.num_machines, machine_rank=args.machine_rank,
            dist_url=args.dist_url, args=(args,))

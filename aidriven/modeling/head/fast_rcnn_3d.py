@@ -1,6 +1,6 @@
 # modeling/roi_heads/fast_rcnn_3d.py
 import torch, torch.nn as nn, torch.nn.functional as F
-from detectron2.layers import ShapeSpec, linear_init
+from detectron2.layers import ShapeSpec
 from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers, _log_classification_stats
 from detectron2.structures import Boxes, Instances
 from typing import List, Dict, Tuple
