@@ -1,4 +1,4 @@
 detectron2/
 
 .DS_Store
-Cruise/datasets/zod/zoddata
+datasets/zod/
