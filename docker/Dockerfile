@@ -83,9 +83,11 @@ CMD ["/bin/bash"]
 #   --confidence-threshold 0.5 \
 #   --opts MODEL.WEIGHTS demo/faster_rcnn_R_50_FPN_3x.pkl
 
-# 데이터 다운로드 방법
+
+# zod 데이터셋 다운로드 방법
+# pip install zod[cli]
 # zod download -y \
-#   --url "https://www.dropbox.com/scl/fo/q81qqpiqygaeys7mppgoe/AFuqa-QrSkGzHmnkhhpvbBE?rlkey=ocr9n0gq3u083zj8sn1yo1ak6&e=1&dl=0" \
+#   --url "link you recieved" \
 #   --subset frames \
 #   --version full \
 #   --output-dir /home/appuser/AIdriven/datasets/zod \

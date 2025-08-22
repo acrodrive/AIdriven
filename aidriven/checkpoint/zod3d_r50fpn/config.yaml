@@ -263,8 +263,8 @@ MODEL:
     NAME: SemSegFPNHead
     NORM: GN
     NUM_CLASSES: 54
-  WEIGHTS: Cruise/pretrained/faster_rcnn_R_50_FPN_3x.pkl
-OUTPUT_DIR: Cruise/checkpoint/zod3d_r50fpn
+  WEIGHTS: pretrained/faster_rcnn_R_50_FPN_3x.pkl
+OUTPUT_DIR: aidriven/checkpoint/zod3d_r50fpn
 SEED: -1
 SOLVER:
   AMP:

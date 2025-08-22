@@ -1,6 +1,6 @@
 # Cruise/configs/zod/zod_config.yaml
 # ZOD_ROOT: /data/ZOD/frames
-# ZOD_VERSION: mini
+# ZOD_VERSION: full
 MODEL:
   META_ARCHITECTURE: "GeneralizedRCNN"
   WEIGHTS: ""   # 트레이너에서 model_zoo URL 또는 로컬 pkl 지정
@@ -51,4 +51,4 @@ SOLVER:
 INPUT:
   FORMAT: "BGR"
 
-OUTPUT_DIR: "Cruise/checkpoint/zod3d_r50fpn"
+OUTPUT_DIR: "aidriven/checkpoint/zod3d_r50fpn"
