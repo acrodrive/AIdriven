@@ -88,5 +88,5 @@ CMD ["/bin/bash"]
 #   --url "https://www.dropbox.com/scl/fo/q81qqpiqygaeys7mppgoe/AFuqa-QrSkGzHmnkhhpvbBE?rlkey=ocr9n0gq3u083zj8sn1yo1ak6&e=1&dl=0" \
 #   --subset frames \
 #   --version full \
-#   --output-dir /home/appuser/zoddata \
+#   --output-dir /home/appuser/AIdriven/datasets/zod \
 #   --no-lidar --no-oxts --no-vehicle-data
