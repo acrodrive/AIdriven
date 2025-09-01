@@ -124,12 +124,13 @@ def setup(args):
 def main(args):
     """Main training function."""
     # Dataset registration should be minimal here
-    register_all_zod(zod_root="/home/appuser/AIdriven/datasets/zod", version="full")
-    
+    register_all_zod("/home/appuser/AIdriven/datasets/zod")
     cfg = setup(args)
+    cfg.DATASETS.TRAIN = ("zod_3class_train",)
+    cfg.DATASETS.TEST  = ("zod_3class_val",)
     trainer = ZOD3DTrainer(cfg)
     trainer.resume_or_load(resume=False)
-    trainer.train()    
+    trainer.train()
 
 if __name__ == "__main__":
     parser = default_argument_parser()

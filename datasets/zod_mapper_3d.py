@@ -1,11 +1,12 @@
 import copy
+import numpy as np
 import torch
 from detectron2.data import detection_utils as utils
 from detectron2.data import transforms as T
 from detectron2.structures import BoxMode, Boxes, Instances
 
 class ZOD3DMapper:
-    def __init__(self, is_train=True, augment=True):
+    def __init__(self, is_train=True):
         self.is_train = is_train
         self.augmentations = T.AugmentationList([
             T.ResizeShortestEdge(
@@ -13,7 +14,7 @@ class ZOD3DMapper:
                 max_size=1333,
                 sample_style="choice"
             )
-        ]) if (is_train and augment) else T.AugmentationList([])
+        ]) if is_train else T.AugmentationList([])
 
     def __call__(self, dataset_dict):
         dataset_dict = copy.deepcopy(dataset_dict)
@@ -22,22 +23,18 @@ class ZOD3DMapper:
         if self.is_train:
             utils.check_image_size(dataset_dict, image)
             
-            # Apply augmentations
             aug_input = T.AugInput(image)
             transforms = self.augmentations(aug_input)
             image = aug_input.image
-            image_shape = image.shape[:2]  # height, width
+            image_shape = image.shape[:2]
             
-            # Create Instances object for gt_instances
             instances = Instances(image_shape)
             
-            # Collect boxes, classes and 3D info
             boxes = []
             classes = []
             boxes_3d = []
             
             for annotation in dataset_dict["annotations"]:
-                # Transform 2D bbox
                 bbox = BoxMode.convert(
                     annotation["bbox"],
                     annotation["bbox_mode"],
@@ -47,22 +44,24 @@ class ZOD3DMapper:
                 boxes.append(bbox)
                 classes.append(annotation["category_id"])
                 
-                # Collect 3D information if available
                 if "box3d" in annotation:
                     box3d = annotation["box3d"]
-                    boxes_3d.append({
-                        "center": torch.tensor(box3d["center"], dtype=torch.float32),
-                        "lwh": torch.tensor(box3d["lwh"], dtype=torch.float32),
-                        "yaw": torch.tensor([box3d["yaw"]], dtype=torch.float32),
-                    })
+                    boxes_3d.append([
+                        *box3d["center"],
+                        *box3d["lwh"],
+                        box3d["yaw"]
+                    ])
             
-            # Convert to tensor format
             if len(boxes):
-                instances.gt_boxes = Boxes(torch.tensor(boxes, dtype=torch.float32))
+                # Convert list to numpy array first
+                boxes = np.asarray(boxes, dtype=np.float32)
+                instances.gt_boxes = Boxes(torch.from_numpy(boxes))
                 instances.gt_classes = torch.tensor(classes, dtype=torch.int64)
                 
                 if boxes_3d:
-                    instances.gt_boxes_3d = boxes_3d
+                    # Convert 3D boxes to tensor
+                    boxes_3d = np.asarray(boxes_3d, dtype=np.float32)
+                    instances.gt_boxes_3d = torch.from_numpy(boxes_3d)
                     
             dataset_dict["instances"] = instances
         
