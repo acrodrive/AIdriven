@@ -1,4 +1,4 @@
-import os
+"""import os
 from detectron2.engine import DefaultTrainer, default_setup, default_argument_parser, launch
 from detectron2.config import get_cfg
 from detectron2 import model_zoo
@@ -36,12 +36,28 @@ def setup(args):
     return cfg
 
 def main(args):
-    # ZOD frames 루트 지정
-    register_all_zod(zod_root="/home/appuser/AIdriven/datasets/zod", version="full")
+    print("Registering ZOD dataset...")
+    zod_root = "/home/appuser/AIdriven/datasets/zod"
+    print(f"ZOD root path exists: {os.path.exists(zod_root)}")
+    
+    single_frames_dir = os.path.join(zod_root, "single_frames")
+    print(f"Single frames dir exists: {os.path.exists(single_frames_dir)}")
+    
+    register_all_zod(zod_root=zod_root, version="full")
+    
+    from detectron2.data.catalog import DatasetCatalog
+    dataset_dicts = DatasetCatalog.get("zod3d_train")
+    print(f"\nDataset summary:")
+    print(f"- Total samples found: {len(dataset_dicts)}")
+    
+    if len(dataset_dicts) > 0:
+        n_annos = len(dataset_dicts[0].get('annotations', []))
+        print(f"- First sample has {n_annos} annotations")
+    
     cfg = setup(args)
     trainer = ZOD3DTrainer(cfg)
     trainer.resume_or_load(resume=False)
-    trainer.train()
+    trainer.train()    
 
 if __name__ == "__main__":
     parser = default_argument_parser()
@@ -54,16 +70,72 @@ if __name__ == "__main__":
     launch(main, args.num_gpus or 1, num_machines=args.num_machines, machine_rank=args.machine_rank,
            dist_url=args.dist_url, args=(args,))
 
-# 이거 아래 중에 뭘 써야 하노..
-# python projects/cruise/train_net.py --config-file configs/COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml --num-gpus 1
-# python projects/cruise/train_net.py --config-file aidriven/ZOD3D/zod3d_r50fpn.yaml --num-gpus 1
-# python -m projects.cruise.train_zod_3d   --num-gpus 1   --weights pretrained/faster_rcnn_R_50_FPN_3x.pkl   --output aidriven/checkpoint/zod3d_r50fpn
-
+# 코드 실행 방법
+# python -m projects.cruise.train_net   --num-gpus 1   --weights pretrained/faster_rcnn_R_50_FPN_3x.pkl   --output aidriven/checkpoint/zod3d_r50fpn
+# 보기 좋게 표현하자면
 # python -m projects.cruise.train_net \
 #   --num-gpus 1 \
 #   --weights pretrained/faster_rcnn_R_50_FPN_3x.pkl \
 #   --output aidriven/checkpoint/zod3d_r50fpn
 
-# trainval-frames-full.json 파일이 없다면 single_frames에 존재하지 않고 상위 폴더에 존재한다면 아래 명령어로 심볼릭 링크 생성
+# trainval-frames-full.json 경로 문제가 발생할 수 있음
+# 최상위 폴더에만 해당 파일이 존재하는데 굳이 하위 경로에서 참조하려고 프로그램에서 시도하는 경우
+# 아래 명령어로 심볼릭 링크 생성
 # ln -sf ../trainval-frames-full.json \
-#  /home/appuser/AIdriven/datasets/zod/single_frames/trainval-frames-full.json
+#  /home/appuser/AIdriven/datasets/zod/single_frames/trainval-frames-full.json"""
+
+import os
+from detectron2.engine import DefaultTrainer, default_setup, default_argument_parser, launch
+from detectron2.config import get_cfg
+from detectron2 import model_zoo
+from detectron2.data import build_detection_train_loader, build_detection_test_loader
+
+from datasets.zod_register import register_all_zod
+from datasets.zod_mapper_3d import ZOD3DMapper
+from aidriven.modeling.head.roi_heads_3d import ROIHeads3D  # noqa: F401
+
+class ZOD3DTrainer(DefaultTrainer):
+    """Custom trainer for 3D object detection."""
+    @classmethod
+    def build_train_loader(cls, cfg):
+        return build_detection_train_loader(cfg, mapper=ZOD3DMapper(is_train=True))
+
+    @classmethod
+    def build_test_loader(cls, cfg, dataset_name):
+        return build_detection_test_loader(cfg, dataset_name, mapper=ZOD3DMapper(is_train=False))
+
+def setup(args):
+    """Setup training configuration."""
+    cfg = get_cfg()
+    cfg.merge_from_file("configs/zod_config.yaml")
+
+    # Model weights initialization
+    if args.weights and os.path.exists(args.weights):
+        cfg.MODEL.WEIGHTS = args.weights
+    
+    # Training parameters
+    if args.output:
+        cfg.OUTPUT_DIR = args.output
+        os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+    
+    default_setup(cfg, args)
+    return cfg
+
+def main(args):
+    """Main training function."""
+    # Dataset registration should be minimal here
+    register_all_zod(zod_root="/home/appuser/AIdriven/datasets/zod", version="full")
+    
+    cfg = setup(args)
+    trainer = ZOD3DTrainer(cfg)
+    trainer.resume_or_load(resume=False)
+    trainer.train()    
+
+if __name__ == "__main__":
+    parser = default_argument_parser()
+    parser.add_argument("--weights", type=str, default="")
+    parser.add_argument("--output", type=str, default="")
+    args = parser.parse_args()
+    
+    launch(main, args.num_gpus or 1, num_machines=args.num_machines, 
+           machine_rank=args.machine_rank, dist_url=args.dist_url, args=(args,))

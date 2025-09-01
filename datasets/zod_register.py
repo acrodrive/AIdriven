@@ -6,43 +6,53 @@ from detectron2.structures import BoxMode
 
 from zod import ZodFrames  # frames subset 사용 가정
 
-ZOD_CATS = ["Car", "Pedestrian", "Cyclist"]
+ZOD_CATS = ["car", "pedestrian", "cyclist"]  # lowercase로 통일
 CAT_TO_ID = {k: i for i, k in enumerate(ZOD_CATS)}
 
 def _objects_to_detectron(objects):
     annos = []
+    # print(f"Processing {len(objects)} objects")  # Debug print
+    
     for obj in objects:
+        # Debug print object structure
+        # print(f"Object attributes: {dir(obj)}")
+        
         cls_name = getattr(obj, "category", None) or getattr(obj, "label", None)
         if cls_name not in CAT_TO_ID:
+            # print(f"Skipping unknown category: {cls_name}")  # Debug print
             continue
 
-        # 2D bbox
-        if getattr(obj, "box2d", None):
-            x1, y1, x2, y2 = obj.box2d.xyxy
-        elif getattr(obj, "bbox", None):
-            x1, y1, x2, y2 = obj.bbox.xyxy
-        else:
+        # Get 2D bbox
+        box2d = None
+        if hasattr(obj, "box2d"):
+            box2d = obj.box2d
+        elif hasattr(obj, "bbox"):
+            box2d = obj.bbox
+        
+        if not box2d:
             continue
+            
+        x1, y1, x2, y2 = box2d
 
-        # 3D
-        if getattr(obj, "box3d", None):
-            center = obj.box3d.center  # (x,y,z)
-            lwh = obj.box3d.lwh        # (l,w,h)
-            yaw = getattr(obj.box3d, "yaw", None)
-            if yaw is None and getattr(obj.box3d, "quaternion", None):
-                yaw = obj.box3d.quaternion.yaw  # SDK가 제공하는 경우
-        else:
+        # Get 3D box
+        box3d = getattr(obj, "box3d", None)
+        if not box3d:
             continue
+            
+        # Extract 3D parameters
+        center = getattr(box3d, "center", [0, 0, 0])
+        lwh = getattr(box3d, "lwh", [0, 0, 0])
+        yaw = getattr(box3d, "yaw", 0.0)
 
         annos.append({
             "bbox": [float(x1), float(y1), float(x2), float(y2)],
             "bbox_mode": BoxMode.XYXY_ABS,
-            "category_id": CAT_TO_ID[cls_name],
-            "zod_3d": {
-                "center": [float(center[0]), float(center[1]), float(center[2])],
-                "lwh": [float(lwh[0]), float(lwh[1]), float(lwh[2])],
-                "yaw": float(yaw) if yaw is not None else 0.0,
-            },
+            "category_id": CAT_TO_ID[cls_name.lower()],  # Convert to lowercase
+            "box3d": {
+                "center": [float(c) for c in center],
+                "lwh": [float(d) for d in lwh],
+                "yaw": float(yaw),
+            }
         })
     return annos
 
@@ -215,83 +225,92 @@ def _load_2d_boxes_if_any(ann_dir: str) -> List[Dict]:
     # 그 외 구조는 미지원 → 빈 리스트
     return []
 
-"""def load_zod_split(zod_root, split="train", version="full", limit=None):
+def load_zod_split(zod_root: str, split: str, version: str):
+    from zod import ZodFrames
+    import json
     
-    # version: "mini" 또는 "full" (다운로드한 버전에 맞추세요)
-    # split: "train" / "val"
-    
-    # ★ version 필수!
     zf = ZodFrames(dataset_root=zod_root, version=version)
-
-    # 간단 80/20 split (원하면 공식 split API로 바꿔도 됨)
-    frames = sorted(_iter_frames(zf, split), key=lambda f: f.id)
-    cut = int(len(frames) * 0.8)
-    sel = frames[:cut] if split == "train" else frames[cut:]
-    if limit:
-        sel = sel[:limit]
-
-    dataset = []
-    for fm in sel:
-        # 이미지 경로/크기 (SDK 버전에 따라 접근자가 다를 수 있음)
-        img_path = fm.image.path
-        height, width = fm.image.size[1], fm.image.size[0]
-
-        objects = fm.annotations.objects if hasattr(fm.annotations, "objects") else []
-        annos = _objects_to_detectron(objects)
+    fids = _fid_list(zf, split)
+    dataset_dicts = []
+    
+    print(f"Processing {len(fids)} frames...")
+    valid = 0
+    
+    for fid in fids:
+        frame_dir = os.path.join(zod_root, "single_frames", str(fid))
+        img_path = _find_front_image(frame_dir)
+        if not img_path:
+            continue
+            
+        # Read object detection annotations
+        ann_file = os.path.join(frame_dir, "annotations", "object_detection.json")
+        if not os.path.exists(ann_file):
+            continue
+            
+        with open(ann_file, 'r') as f:
+            annotations = json.load(f)
+            
+        annos = []
+        for obj in annotations:
+            if "properties" not in obj or "geometry" not in obj:
+                continue
+                
+            props = obj["properties"]
+            geom = obj["geometry"]
+            
+            # Skip if not one of our target classes
+            obj_class = props.get("class", "").lower()
+            if obj_class not in CAT_TO_ID:
+                continue
+                
+            # Get 2D bbox from geometry
+            if geom["type"] != "MultiPoint" or len(geom["coordinates"]) != 4:
+                continue
+                
+            # Convert quadrilateral to bbox
+            points = geom["coordinates"]
+            x_coords = [p[0] for p in points]
+            y_coords = [p[1] for p in points]
+            x1, y1 = min(x_coords), min(y_coords)
+            x2, y2 = max(x_coords), max(y_coords)
+            
+            # Get 3D information
+            loc_3d = props.get("location_3d", {}).get("coordinates", [0,0,0])
+            size_3d = [
+                props.get("size_3d_length", 0),
+                props.get("size_3d_width", 0),
+                props.get("size_3d_height", 0)
+            ]
+            yaw = props.get("orientation_3d_qz", 0)
+            
+            annos.append({
+                "bbox": [float(x1), float(y1), float(x2), float(y2)],
+                "bbox_mode": BoxMode.XYXY_ABS,
+                "category_id": CAT_TO_ID[obj_class],
+                "box3d": {
+                    "center": [float(x) for x in loc_3d],
+                    "lwh": [float(x) for x in size_3d],
+                    "yaw": float(yaw)
+                }
+            })
+            
         if not annos:
             continue
-
-        dataset.append({
+            
+        # Get image size
+        with Image.open(img_path) as img:
+            width, height = img.size
+            
+        valid += 1
+        dataset_dicts.append({
             "file_name": img_path,
-            "image_id": fm.id,
+            "image_id": fid,
             "height": height,
             "width": width,
             "annotations": annos,
         })
-    return dataset"""
-
-def load_zod_split(zod_root: str, split: str, version: str):
-    from zod import ZodFrames
-    zf = ZodFrames(dataset_root=zod_root, version=version)
-    fids = _fid_list(zf, split)
-
-    dataset_dicts = []
-    single_frames_root = os.path.join(zod_root, "single_frames")
-
-    for fid in fids:
-        frame_dir = os.path.join(single_frames_root, str(fid).zfill(6))
-        # 프레임 폴더가 실제로는 6자리 zero-pad로 되어 있음(000000 형태). 아니라면 str(fid)로만.
-        if not os.path.isdir(frame_dir):
-            # fallback: zero-pad 없이
-            frame_dir = os.path.join(single_frames_root, str(fid))
-            if not os.path.isdir(frame_dir):
-                continue
-
-        img_path = _find_front_image(frame_dir)
-        if not img_path or not os.path.exists(img_path):
-            # 이미지 없으면 스킵
-            continue
-
-        # H,W 얻기
-        try:
-            with Image.open(img_path) as im:
-                W, H = im.size
-        except Exception:
-            H = W = None
-
-        # 2D box 읽기(있으면)
-        ann_dir = os.path.join(frame_dir, "annotations")
-        annos = _load_2d_boxes_if_any(ann_dir)
-
-        record = {
-            "image_id": int(fid) if str(fid).isdigit() else str(fid),
-            "file_name": img_path,
-            "height": H,
-            "width": W,
-            "annotations": annos,  # 학습하려면 최소 2D bbox가 있어야 함
-        }
-        dataset_dicts.append(record)
-
+    
+    print(f"Found {valid} valid samples")
     return dataset_dicts
 
 def register_zod(name: str, zod_root: str, split: str, version: str = "full"):
@@ -299,7 +318,7 @@ def register_zod(name: str, zod_root: str, split: str, version: str = "full"):
     # 실제 클래스 이름으로 바꾸세요
     MetadataCatalog.get(name).set(thing_classes=["car","pedestrian","cyclist"])
     
-def register_all_zod(zod_root="/home/appuser/AIdriven/datasets/zod/single_frames", version=None):
+def register_all_zod(zod_root="/home/appuser/AIdriven/datasets/zod", version=None):
     """
     프로젝트나 환경변수에서 버전을 지정할 수 있게 함.
     """
