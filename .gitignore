@@ -1,6 +1,7 @@
 detectron2/
-
-.DS_Store
 datasets/zod/
+projects/test/rsds.py
 
 repo-backup.git/
+
+.DS_Store
