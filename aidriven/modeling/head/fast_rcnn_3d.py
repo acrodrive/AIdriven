@@ -75,40 +75,51 @@ class FastRCNN3DOutputLayers(FastRCNNOutputLayers):
         return torch.cat(gt_3d_list, dim=0), torch.cat(gt_yaw_list, dim=0)
 
 
-    def losses(
-        self, predictions, proposals: List[Instances]
-    ) -> Dict[str, torch.Tensor]:
+    def losses(self, predictions, proposals: List[Instances]) -> Dict[str, torch.Tensor]:
         """
-        기존 2D 분류/회귀 손실 + 3D 회귀 손실 추가
+        기존 2D 분류/회귀 손실 + 3D 회귀 손실 추가.
+        빈 배치/3D 미존재 시에도 안전하게 0 스칼라 손실을 반환하도록 방어 코드 포함.
         """
-        scores, proposal_deltas, bbox3d = predictions
-        # --- 기존 손실 ---
+        # --- predictions 안전 언패킹 ---
+        if isinstance(predictions, (list, tuple)):
+            if len(predictions) == 3:
+                scores, proposal_deltas, bbox3d = predictions
+            elif len(predictions) == 2:
+                scores, proposal_deltas = predictions
+                bbox3d = None
+            else:
+                raise ValueError(f"Unexpected predictions length: {len(predictions)}")
+        elif isinstance(predictions, dict):
+            # 가능한 키 이름 호환
+            scores = predictions.get("scores", predictions.get("pred_class_logits"))
+            proposal_deltas = predictions.get("proposal_deltas", predictions.get("pred_proposal_deltas"))
+            bbox3d = predictions.get("pred_3d", predictions.get("bbox3d"))
+        else:
+            raise TypeError(f"Unexpected predictions type: {type(predictions)}")
+
+        # --- 2D 손실 ---
         losses = super().losses((scores, proposal_deltas), proposals)
 
-        # --- 3D 손실 ---
+        # --- 3D 타깃 준비 ---
         gt_3d, gt_yaw_sc = self._prepare_3d_targets(proposals)  # (M,6), (M,2)
-        # pred select: proposals에서 fg만큼이 box 회귀 타깃 개수와 같음
-        # FastRCNNOutputLayers._get_deltas 메커니즘과 동일하게 fg 수만큼 반환되므로
-        # 여기서도 bbox3d는 fg 개수 M만 고려해야 함.
-        # 이를 위해 super() 내부의 순서를 따라 fg_inds를 재구성하는 대신,
-        # box 회귀 손실과 동일한 마스크를 공유하는 것이 안전하다.
-        # => trick: super().losses 호출 직후, 내부에서 사용한 fg 개수와 동일하도록
-        #           logits/box pred를 생성한 입력 순서가 유지된다고 가정
-        # Detectron2 구현상 fg 순서 정합이 유지되므로 그대로 사용 가능
-        M = gt_3d.shape[0]
-        if M > 0:
-            pred_3d = bbox3d[:M]  # (M,8)
+        zero = scores.new_zeros(())  # pred_3d가 없어도 안전하게 0 스칼라 생성
+
+        M = int(gt_3d.shape[0]) if hasattr(gt_3d, "shape") else 0
+        m_use = min(M, int(bbox3d.shape[0])) if (bbox3d is not None and hasattr(bbox3d, "shape")) else 0
+
+        if m_use > 0:
+            pred_3d = bbox3d[:m_use]              # (m_use, 8) = [x,y,z,w,l,h,sin(yaw),cos(yaw)]
             pred_xyz = pred_3d[:, 0:3]
             pred_wlh = pred_3d[:, 3:6]
             pred_yaw_sc = pred_3d[:, 6:8]
 
-            loss_xyz = F.smooth_l1_loss(pred_xyz, gt_3d[:, 0:3], reduction="mean")
-            loss_wlh = F.smooth_l1_loss(pred_wlh, gt_3d[:, 3:6], reduction="mean")
-            loss_yaw = F.l1_loss(pred_yaw_sc, gt_yaw_sc, reduction="mean")
+            loss_xyz = F.smooth_l1_loss(pred_xyz, gt_3d[:m_use, 0:3], reduction="mean")
+            loss_wlh = F.smooth_l1_loss(pred_wlh, gt_3d[:m_use, 3:6], reduction="mean")
+            loss_yaw = F.l1_loss(pred_yaw_sc, gt_yaw_sc[:m_use], reduction="mean")
         else:
-            loss_xyz = pred_3d.new_zeros(())
-            loss_wlh = pred_3d.new_zeros(())
-            loss_yaw = pred_3d.new_zeros(())
+            loss_xyz = zero
+            loss_wlh = zero
+            loss_yaw = zero
 
         losses.update({
             "loss_3d_xyz": loss_xyz,
