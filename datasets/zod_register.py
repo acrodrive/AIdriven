@@ -1,7 +1,47 @@
 import os, glob, json
+import math
 from typing import List, Dict, Any, Tuple, Optional
 from detectron2.data import DatasetCatalog, MetadataCatalog
 from detectron2.structures import BoxMode
+
+# ---- helper: extract 3D fields from properties ----
+def _extract_3d_extras(obj):
+    """Return (bbox3d, yaw_sc) from `properties` if available, else (None, None).
+    bbox3d: [x, y, z, w, l, h]
+    yaw_sc: [sin(yaw), cos(yaw)]
+    """
+    import math
+    try:
+        props = obj.get("properties", obj)
+        loc3d = props.get("location_3d", {})
+        sizeL = props.get("size_3d_length", None)
+        sizeW = props.get("size_3d_width", None)
+        sizeH = props.get("size_3d_height", None)
+        qw = props.get("orientation_3d_qw", None)
+        qx = props.get("orientation_3d_qx", None)
+        qy = props.get("orientation_3d_qy", None)
+        qz = props.get("orientation_3d_qz", None)
+
+        if isinstance(loc3d, dict):
+            coords3d = loc3d.get("coordinates", None)
+        else:
+            coords3d = None
+
+        if coords3d and sizeL is not None and sizeW is not None and sizeH is not None:
+            x, y, z = float(coords3d[0]), float(coords3d[1]), float(coords3d[2])
+            w, l, h = float(sizeW), float(sizeL), float(sizeH)
+            bbox3d = [x, y, z, w, l, h]
+
+            yaw_sc = None
+            if None not in (qw, qx, qy, qz):
+                qw, qx, qy, qz = float(qw), float(qx), float(qy), float(qz)
+                # yaw (Z-rotation). Adjust if dataset uses different convention.
+                yaw = math.atan2(2*(qw*qz + qx*qy), 1 - 2*(qy*qy + qz*qz))
+                yaw_sc = [math.sin(yaw), math.cos(yaw)]
+            return bbox3d, yaw_sc
+    except Exception:
+        pass
+    return None, None
 
 # --- Added helper: robust bbox extraction from geometry.coordinates ---
 def _bbox_from_geom_coordinates(obj):
@@ -252,6 +292,8 @@ def load_zod_simple(ann_files: List[str]) -> List[Dict[str, Any]]:
                 continue
 
             bbox, mode = _bbox_from_simple_with_geom(obj)
+            bbox3d, yaw_sc = _extract_3d_extras(obj)
+
             if not _bbox_valid(bbox, mode):
                 bad += 1
                 continue
@@ -263,7 +305,14 @@ def load_zod_simple(ann_files: List[str]) -> List[Dict[str, Any]]:
                 "category_id": CAT_TO_ID[std],
                 "iscrowd": int(props.get("iscrowd", 0)),
             })
+
+            # attach 3D extras when available
+            if bbox3d is not None and yaw_sc is not None:
+                record["annotations"][-1]["bbox3d"] = bbox3d
+                record["annotations"][-1]["yaw_sc"] = yaw_sc
+
             kept[std] += 1
+
 
         if record["annotations"]:
             dataset.append(record)
