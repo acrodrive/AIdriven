@@ -143,13 +143,6 @@ def _looks_like_xyxy(bb):
     return isinstance(bb,(list,tuple)) and len(bb)==4 and (bb[2] > bb[0]) and (bb[3] > bb[1])
 
 def _bbox_from_simple(obj):
-    """
-    당신 파일 한 타입만 잘 먹게 하되, 가장 흔한 변형들을 모두 흡수:
-    - 리스트형: bbox=[x1,y1,x2,y2] 또는 [x,y,w,h]
-    - 딕트형:  {xmin,ymin,xmax,ymax} / {x1,y1,x2,y2} / {left,top,right,bottom}
-              {u0,v0,u1,v1} / {x,y,w,h} / {cx,cy,w,h}
-    - 위치: properties 또는 최상위, 그리고 box2d/bbox/box/rect/geometry/region/shape 아래
-    """
     props = obj.get("properties", obj)
 
     # 1) 리스트형 바로 치기
@@ -310,7 +303,7 @@ def load_zod_simple(ann_files: List[str]) -> List[Dict[str, Any]]:
     print(f"[ZOD DEBUG] built records = {len(dataset)}")
     return dataset
 
-def register_all_zod(zod_root: str):
+def register_all_zod(zod_root: str): # Detectron2의 DatasetCatalog에 등록함
     assert os.path.isdir(zod_root), f"Invalid zod_root: {zod_root}"
     ann_glob = os.path.join(zod_root, "single_frames", "*", "annotations", "object_detection.json")
     ann_files = sorted(glob.glob(ann_glob))
@@ -325,5 +318,5 @@ def register_all_zod(zod_root: str):
         MetadataCatalog.get(name).set(thing_classes=THING_CLASSES)
         print(f"[ZOD] Registered {name}")
 
-    _safe("zod_3class_train", lambda: load_zod_simple(ann_files))
-    _safe("zod_3class_val",   lambda: load_zod_simple(ann_files))
+    _safe("zod_3class_train", lambda: load_zod_simple(ann_files)) # 야 이거 누가 만들었냐;
+    _safe("zod_3class_val",   lambda: load_zod_simple(ann_files)) # 7:3으로 분리하던가 해라

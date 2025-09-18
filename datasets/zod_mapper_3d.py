@@ -1,3 +1,27 @@
+"""
+원본 데이터(이미지, 어노테이션)는 모델이 곧바로 사용할 수 있는 형태가 아님.
+예를 들어 다음과 같은 원본이 데이터가 있음
+
+{
+  "file_name": "frame_00123.png",
+  "annotations": [
+    {"bbox": [100, 200, 300, 400], "category_id": 2},
+    {"bbox": [50, 50, 80, 120], "category_id": 1}
+  ]
+}
+
+
+이것을 그대로 모델에 입력할 수 없음.
+
+이미지를 불러와서 Tensor로 바꿔야 하고 박스 좌표를 정규화(normalize)하고, 데이터 증강(augmentation: flip, crop, color jitter 등)을 적용해야 함.
+
+이렇게 데이터 전처리를 담당하는 것이 mapper임
+
+Detectron2의 기본 mapper는 DatasetMapper임
+하지만 ZOD와 같은 외부 데이터 셋을 쓰는 경우 당연히 거기에서 정의하는 원본 데이터는 다른 형태일 것임.
+그렇게 되면 기본 매퍼가 이해하지 못하니까, ZOD3DMapper 같은 커스텀 매퍼를 만들어야 함.
+"""
+
 import copy
 import torch
 from detectron2.structures import Boxes, Instances
