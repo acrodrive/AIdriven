@@ -34,8 +34,9 @@ class ROIHeads3D(StandardROIHeads):
 
     def _forward_box(self, features, proposals):
         """
-        StandardROIHeads._forward_box를 기반으로,
-        FastRCNN3DOutputLayers의 추가 출력/손실을 처리.
+        StandardROIHeads._forward_box 규약:
+        - self.training == True -> '손실 dict'만 반환
+        - self.training == False -> 'pred_instances(Instances)'만 반환
         """
         box_features = self.box_pooler(
             [features[f] for f in self.box_in_features],
@@ -43,18 +44,24 @@ class ROIHeads3D(StandardROIHeads):
         )
         box_features = self.box_head(box_features)  # (sum_props, rep_dim)
 
+        # 3D predictor 호출
         pred_class_logits, pred_proposal_deltas, pred_3d = self.box_predictor(box_features)
 
         if self.training:
+            # 반드시 dict만 반환해야 함
             losses = self.box_predictor.losses(
                 (pred_class_logits, pred_proposal_deltas, pred_3d), proposals
             )
-            return [], losses
+            # 혹시 내부가 실수로 튜플을 주면 방어적으로 dict만 취함
+            if isinstance(losses, tuple):
+                losses = losses[-1]
+            return losses
+
         else:
-            # 2D 박스/클래스는 부모 predictor의 inference를 그대로 활용
+            # 평가 모드: 2D는 기존 inference, 3D는 별도 부착
             pred_instances, _ = self.box_predictor.inference(
                 (pred_class_logits, pred_proposal_deltas), proposals
             )
-            # 3D 결과 부착
             self.box_predictor.inference_3d(box_features, pred_instances)
-            return pred_instances, {}
+            return pred_instances
+

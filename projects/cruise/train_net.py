@@ -128,6 +128,22 @@ def main(args):
     cfg = setup(args)
     cfg.DATASETS.TRAIN = ("zod_3class_train",)
     cfg.DATASETS.TEST  = ("zod_3class_val",)
+    
+    cfg.SOLVER.IMS_PER_BATCH = 1
+    cfg.SOLVER.BASE_LR = 0.0025 * (cfg.SOLVER.IMS_PER_BATCH / 4.0)
+    scale = 4.0  # 4→1 로 줄였으니 4배
+    cfg.SOLVER.MAX_ITER = int(9000 * scale)
+    cfg.SOLVER.STEPS = (int(6000 * scale), int(8000 * scale))
+    cfg.SOLVER.AMP.ENABLED = True
+    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 256  # (기본 512)
+    cfg.MODEL.RPN.POST_NMS_TOPK_TRAIN = 500         # (기본 1000)
+    cfg.MODEL.RPN.POST_NMS_TOPK_TEST  = 1000
+    cfg.MODEL.RESNETS.FREEZE_AT = 2
+    #cfg.INPUT.MIN_SIZE_TRAIN = (640, 720, 800)
+    #cfg.INPUT.MAX_SIZE_TRAIN = 1333
+    #cfg.INPUT.MIN_SIZE_TEST  = 800
+    #cfg.INPUT.MAX_SIZE_TEST  = 1333
+    
     trainer = ZOD3DTrainer(cfg)
     trainer.resume_or_load(resume=False)
     trainer.train()

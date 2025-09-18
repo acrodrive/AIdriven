@@ -24,22 +24,56 @@ class FastRCNN3DOutputLayers(FastRCNNOutputLayers):
         bbox3d = self.bbox_3d_pred(x)  # (N, 8)
         return scores, proposal_deltas, bbox3d
 
-    @staticmethod
-    def _prepare_3d_targets(proposals: List[Instances]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _prepare_3d_targets(self, proposals):
         """
-        proposals[i]는 sampling/matching된 GT가 부착됨.
-        gt_boxes3d: (N,6), gt_yaw_sincos: (N,2)
+        proposals: list[Instances] (학습용, gt_classes가 라벨링된 상태)
+        반환: (cat over images) gt_3d: (M,6), gt_yaw_sc: (M,2)
+        -> M은 배치 내 포지티브(전경) proposal 총 개수
         """
-        gt_3d = []
-        gt_yaw_sc = []
+        gt_3d_list = []
+        gt_yaw_list = []
+
+        # self.num_classes 가 ROIHeads의 num_classes와 일치한다고 가정
+        num_classes = getattr(self, "num_classes", None)
+
         for p in proposals:
-            # 선택된 foreground만 포함하도록 gt_classes가 -1 아닌 것들을 사용
-            fg_inds = (p.gt_classes >= 0) & (p.gt_classes != 255)
-            gt_3d.append(p.gt_boxes3d[fg_inds])
-            gt_yaw_sc.append(p.gt_yaw_sincos[fg_inds])
-        if len(gt_3d) == 0:
-            return torch.zeros(0,6), torch.zeros(0,2)
-        return torch.cat(gt_3d, dim=0), torch.cat(gt_yaw_sc, dim=0)
+            # 전경 인덱스 추출 (배경 = num_classes)
+            # (Detectron2 기본 규약: 0..C-1 foreground, C background, -1 ignore)
+            gtcls = p.gt_classes
+            if num_classes is not None:
+                fg_mask = (gtcls >= 0) & (gtcls < num_classes)
+            else:
+                # 혹시 num_classes 접근이 어려우면 배경이 아닌 것만 전경으로 취급
+                fg_mask = (gtcls >= 0)
+            fg_inds = fg_mask.nonzero().squeeze(1)
+
+            # 전경이 0개면 빈 텐서 푸시하고 다음 이미지로
+            if fg_inds.numel() == 0:
+                device = gtcls.device
+                gt_3d_list.append(torch.zeros((0, 6), device=device, dtype=torch.float32))
+                gt_yaw_list.append(torch.zeros((0, 2), device=device, dtype=torch.float32))
+                continue
+
+            # 3D 필드가 proposals에 없으면(혹은 길이 불일치) 안전 스킵
+            if (not hasattr(p, "gt_boxes3d")) or (not hasattr(p, "gt_yaw_sincos")):
+                device = gtcls.device
+                gt_3d_list.append(torch.zeros((0, 6), device=device, dtype=torch.float32))
+                gt_yaw_list.append(torch.zeros((0, 2), device=device, dtype=torch.float32))
+                continue
+
+            # 정상 경로: 전경 인덱스만 추출
+            gt_3d_list.append(p.gt_boxes3d[fg_inds])
+            gt_yaw_list.append(p.gt_yaw_sincos[fg_inds])
+
+        if len(gt_3d_list) == 0:
+            # 방어적 처리: 비정상 케이스
+            device = proposals[0].gt_classes.device if len(proposals) else torch.device("cpu")
+            return (torch.zeros((0, 6), device=device, dtype=torch.float32),
+                    torch.zeros((0, 2), device=device, dtype=torch.float32))
+
+        # 전 이미지 합치기 (전경이 없던 이미지는 (0,*) 이므로 문제 없음)
+        return torch.cat(gt_3d_list, dim=0), torch.cat(gt_yaw_list, dim=0)
+
 
     def losses(
         self, predictions, proposals: List[Instances]

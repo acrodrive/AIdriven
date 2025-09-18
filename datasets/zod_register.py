@@ -1,16 +1,52 @@
 import os, glob, json
-import math
 from typing import List, Dict, Any, Tuple, Optional
 from detectron2.data import DatasetCatalog, MetadataCatalog
 from detectron2.structures import BoxMode
 
-# ---- helper: extract 3D fields from properties ----
+# ---- helpers added ----
+def _bbox_from_geom_coordinates(obj):
+    try:
+        geom = obj.get("geometry", {})
+        if not isinstance(geom, dict):
+            return None, None
+        gtype = str(geom.get("type", "")).lower()
+        coords = geom.get("coordinates")
+        if gtype not in ("multipoint", "polygon") or not isinstance(coords, (list, tuple)):
+            return None, None
+        # polygon nesting [[[x,y],...]]
+        if gtype == "polygon" and coords and isinstance(coords[0], (list, tuple)) and len(coords) > 0 \
+           and coords[0] and isinstance(coords[0][0], (list, tuple)):
+            pts = coords[0]
+        else:
+            pts = coords
+        xs, ys = [], []
+        for p in pts:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                xs.append(float(p[0])); ys.append(float(p[1]))
+            elif isinstance(p, dict) and ("x" in p and "y" in p):
+                xs.append(float(p["x"])); ys.append(float(p["y"]))
+        if not xs or not ys:
+            return None, None
+        x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
+        if x2 > x1 and y2 > y1:
+            return [x1, y1, x2, y2], BoxMode.XYXY_ABS
+        return None, None
+    except Exception:
+        return None, None
+
+def _bbox_from_simple_with_geom(obj):
+    try:
+        orig = globals().get("_bbox_from_simple", None)
+        if callable(orig):
+            bbox, mode = orig(obj)
+            if bbox and mode is not None:
+                return bbox, mode
+    except Exception:
+        pass
+    return _bbox_from_geom_coordinates(obj)
+
 def _extract_3d_extras(obj):
-    """Return (bbox3d, yaw_sc) from `properties` if available, else (None, None).
-    bbox3d: [x, y, z, w, l, h]
-    yaw_sc: [sin(yaw), cos(yaw)]
-    """
-    import math
+    """Return (bbox3d, yaw_sincos) or (None, None)."""
     try:
         props = obj.get("properties", obj)
         loc3d = props.get("location_3d", {})
@@ -32,65 +68,19 @@ def _extract_3d_extras(obj):
             w, l, h = float(sizeW), float(sizeL), float(sizeH)
             bbox3d = [x, y, z, w, l, h]
 
-            yaw_sc = None
             if None not in (qw, qx, qy, qz):
-                qw, qx, qy, qz = float(qw), float(qx), float(qy), float(qz)
-                # yaw (Z-rotation). Adjust if dataset uses different convention.
+                # yaw about Z
                 yaw = math.atan2(2*(qw*qz + qx*qy), 1 - 2*(qy*qy + qz*qz))
-                yaw_sc = [math.sin(yaw), math.cos(yaw)]
-            return bbox3d, yaw_sc
+                yaw_sincos = [math.sin(yaw), math.cos(yaw)]
+            else:
+                yaw_sincos = None
+            return bbox3d, yaw_sincos
     except Exception:
         pass
     return None, None
+# ---- end helpers ----
 
-# --- Added helper: robust bbox extraction from geometry.coordinates ---
-def _bbox_from_geom_coordinates(obj):
-    try:
-        geom = obj.get("geometry", {})
-        if not isinstance(geom, dict):
-            return None, None
-        gtype = str(geom.get("type", "")).lower()
-        coords = geom.get("coordinates")
-        if gtype not in ("multipoint", "polygon") or not isinstance(coords, (list, tuple)):
-            return None, None
-
-        # Handle Polygon nesting: [[[x,y], ...]] -> take outer ring
-        if gtype == "polygon" and coords and isinstance(coords[0], (list, tuple)) and len(coords) > 0 \
-           and coords[0] and isinstance(coords[0][0], (list, tuple)):
-            pts = coords[0]
-        else:
-            pts = coords
-
-        xs, ys = [], []
-        for p in pts:
-            if isinstance(p, (list, tuple)) and len(p) >= 2:
-                xs.append(float(p[0])); ys.append(float(p[1]))
-            elif isinstance(p, dict) and ("x" in p and "y" in p):
-                xs.append(float(p["x"])); ys.append(float(p["y"]))
-        if not xs or not ys:
-            return None, None
-        x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
-        if x2 > x1 and y2 > y1:
-            return [x1, y1, x2, y2], BoxMode.XYXY_ABS
-        return None, None
-    except Exception:
-        return None, None
-
-def _bbox_from_simple_with_geom(obj):
-    # Try original function if present
-    try:
-        bbox_mode = globals().get("_bbox_from_simple", None)
-        if callable(bbox_mode):
-            bbox, mode = bbox_mode(obj)
-            # If it returned a valid bbox, keep it
-            if bbox and mode is not None:
-                return bbox, mode
-    except Exception:
-        pass
-    # Fallback to geometry.coordinates-based bbox
-    return _bbox_from_geom_coordinates(obj)
-# --- end added helper ---
-
+import math
 
 THING_CLASSES = ["car", "pedestrian", "cyclist"]
 CAT_TO_ID = {k:i for i,k in enumerate(THING_CLASSES)}
@@ -292,8 +282,6 @@ def load_zod_simple(ann_files: List[str]) -> List[Dict[str, Any]]:
                 continue
 
             bbox, mode = _bbox_from_simple_with_geom(obj)
-            bbox3d, yaw_sc = _extract_3d_extras(obj)
-
             if not _bbox_valid(bbox, mode):
                 bad += 1
                 continue
@@ -305,14 +293,12 @@ def load_zod_simple(ann_files: List[str]) -> List[Dict[str, Any]]:
                 "category_id": CAT_TO_ID[std],
                 "iscrowd": int(props.get("iscrowd", 0)),
             })
-
             # attach 3D extras when available
-            if bbox3d is not None and yaw_sc is not None:
-                record["annotations"][-1]["bbox3d"] = bbox3d
-                record["annotations"][-1]["yaw_sc"] = yaw_sc
-
+            bbox3d, yaw_sincos = _extract_3d_extras(obj)
+            if bbox3d is not None and yaw_sincos is not None:
+                record['annotations'][-1]['bbox3d'] = bbox3d
+                record['annotations'][-1]['yaw_sincos'] = yaw_sincos
             kept[std] += 1
-
 
         if record["annotations"]:
             dataset.append(record)
