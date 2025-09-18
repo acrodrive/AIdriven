@@ -47,9 +47,9 @@ WORKDIR /home/appuser
 RUN git clone --depth 1 https://github.com/acrodrive/AIdriven.git
 WORKDIR /home/appuser/AIdriven
 RUN git clone --depth 1 https://github.com/facebookresearch/detectron2.git
-RUN cp -r /home/appuser/AIdriven/detectron2/demo /home/appuser/AIdriven/Cruise/inference
-COPY faster_rcnn_R_50_FPN_3x.pkl /home/appuser/AIdriven/Cruise/pretrained
-COPY rsds.py /home/appuser/AIdriven/Cruise/inference
+RUN cp -r /home/appuser/AIdriven/detectron2/demo /home/appuser/AIdriven/projects/test
+COPY faster_rcnn_R_50_FPN_3x.pkl /home/appuser/AIdriven/pretrained
+# COPY rsds.py /home/appuser/AIdriven/projects/test
 WORKDIR /home/appuser/AIdriven/detectron2
 RUN python -m pip install -e .
 WORKDIR /home/appuser/AIdriven
@@ -62,7 +62,7 @@ CMD ["/bin/bash"]
 
 # 도커 이미지 생성 및 컨테이너 생성
 # docker build -t aidriven:v0 .
-# docker run -it --gpus all --name cruise aidriven:v0
+# docker run -it --gpus all --shm-size=16g --name cruise aidriven:v0
 
 # 컨테이너를 한 번 생성하고 나면 그 뒤로는 컨테이너를 또 생성할 필요 없이 껐다/켰다 하기
 # docker start cruise (백그라운드에서 돔, 백그라운드에서 돌리다가 필요에 따라 터미널에 접근할 수는 있음)
@@ -86,6 +86,7 @@ CMD ["/bin/bash"]
 
 # zod 데이터셋 다운로드 방법
 # pip install zod[cli]
+# pip install --user --no-cache-dir --force-reinstall "dataclass-wizard==0.22.2" # zod 깔면서 호환 안되는 버전이 깔리기 때문에 해야함
 # zod download -y \
 #   --url "link you recieved" \
 #   --subset frames \

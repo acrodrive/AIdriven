@@ -23,6 +23,10 @@ class ZOD3DMapper:
         if self.is_train:
             utils.check_image_size(dataset_dict, image)
             
+            anns = dataset_dict.get("annotations", [])
+            if self.is_train and not anns:
+                return None  # 또는 raise SkipSample
+            
             aug_input = T.AugInput(image)
             transforms = self.augmentations(aug_input)
             image = aug_input.image

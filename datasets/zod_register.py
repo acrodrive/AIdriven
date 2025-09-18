@@ -3,6 +3,55 @@ from typing import List, Dict, Any, Tuple, Optional
 from detectron2.data import DatasetCatalog, MetadataCatalog
 from detectron2.structures import BoxMode
 
+# --- Added helper: robust bbox extraction from geometry.coordinates ---
+def _bbox_from_geom_coordinates(obj):
+    try:
+        geom = obj.get("geometry", {})
+        if not isinstance(geom, dict):
+            return None, None
+        gtype = str(geom.get("type", "")).lower()
+        coords = geom.get("coordinates")
+        if gtype not in ("multipoint", "polygon") or not isinstance(coords, (list, tuple)):
+            return None, None
+
+        # Handle Polygon nesting: [[[x,y], ...]] -> take outer ring
+        if gtype == "polygon" and coords and isinstance(coords[0], (list, tuple)) and len(coords) > 0 \
+           and coords[0] and isinstance(coords[0][0], (list, tuple)):
+            pts = coords[0]
+        else:
+            pts = coords
+
+        xs, ys = [], []
+        for p in pts:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                xs.append(float(p[0])); ys.append(float(p[1]))
+            elif isinstance(p, dict) and ("x" in p and "y" in p):
+                xs.append(float(p["x"])); ys.append(float(p["y"]))
+        if not xs or not ys:
+            return None, None
+        x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
+        if x2 > x1 and y2 > y1:
+            return [x1, y1, x2, y2], BoxMode.XYXY_ABS
+        return None, None
+    except Exception:
+        return None, None
+
+def _bbox_from_simple_with_geom(obj):
+    # Try original function if present
+    try:
+        bbox_mode = globals().get("_bbox_from_simple", None)
+        if callable(bbox_mode):
+            bbox, mode = bbox_mode(obj)
+            # If it returned a valid bbox, keep it
+            if bbox and mode is not None:
+                return bbox, mode
+    except Exception:
+        pass
+    # Fallback to geometry.coordinates-based bbox
+    return _bbox_from_geom_coordinates(obj)
+# --- end added helper ---
+
+
 THING_CLASSES = ["car", "pedestrian", "cyclist"]
 CAT_TO_ID = {k:i for i,k in enumerate(THING_CLASSES)}
 
@@ -199,7 +248,7 @@ def load_zod_simple(ann_files: List[str]) -> List[Dict[str, Any]]:
                 dropped[f"class={_norm(cls_raw)}|type={_norm(typ_raw)}"] += 1
                 continue
 
-            bbox, mode = _bbox_from_simple(obj)
+            bbox, mode = _bbox_from_simple_with_geom(obj)
             if not _bbox_valid(bbox, mode):
                 bad += 1
                 continue
