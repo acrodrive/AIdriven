@@ -233,7 +233,10 @@ def load_zod_simple(ann_files: List[str]) -> List[Dict[str, Any]]:
         # 당신 파일은 "리스트(객체들)" 라고 가정 (업로드 파일 기준)
         objs = root if isinstance(root, list) else root.get("annotations", [])
 
-        record = dict(file_name=file_name, image_id=img_id, height=H, width=W, annotations=[])
+        record = dict(file_name=file_name, image_id=img_id, annotations=[])
+        if H is not None and W is not None:
+            record['height'] = H
+            record['width'] = W
         img_id += 1
 
         for obj in objs:
