@@ -4,7 +4,7 @@
 # python -m projects.cruise.train_net \
 #   --num-gpus 1 \
 #   --weights pretrained/faster_rcnn_R_50_FPN_3x.pkl \
-#   --output aidriven/checkpoint/zod3d_r50fpn
+#   --output aidriven/checkpoint/zod
 
 # trainval-frames-full.json 경로 문제가 발생할 수 있음
 # 최상위 폴더에만 해당 파일이 존재하는데 굳이 하위 경로에서 참조하려고 프로그램에서 시도하는 경우
@@ -15,14 +15,14 @@
 import os
 from detectron2.engine import DefaultTrainer, default_setup, default_argument_parser, launch
 from detectron2.config import get_cfg
-from detectron2 import model_zoo
+#from detectron2 import model_zoo
 from detectron2.data import build_detection_train_loader, build_detection_test_loader
 
-from datasets.zod_register import register_all_zod
-from datasets.zod_mapper_3d import ZOD3DMapper
-from aidriven.modeling.head.roi_heads_3d import ROIHeads3D  # noqa: F401
+from datasets.zod_register import register_zod
+from datasets.zod_mapper import ZODMapper
+#from aidriven.modeling.head.roi_heads_3d import ROIHeads3D  # noqa: F401
 
-class ZOD3DTrainer(DefaultTrainer):
+class ZODTrainer(DefaultTrainer):
     """
     학습할 때 데이터셋을 잘라서 모델에게 하나씩(or 여러 개씩) 공급하는 역할을 하는 Data Loader를 build함
 
@@ -35,11 +35,11 @@ class ZOD3DTrainer(DefaultTrainer):
     
     @classmethod
     def build_train_loader(cls, cfg):
-        return build_detection_train_loader(cfg, mapper=ZOD3DMapper(is_train=True))
+        return build_detection_train_loader(cfg, mapper=ZODMapper(is_train=True))
 
     @classmethod
     def build_test_loader(cls, cfg, dataset_name):
-        return build_detection_test_loader(cfg, dataset_name, mapper=ZOD3DMapper(is_train=False))
+        return build_detection_test_loader(cfg, dataset_name, mapper=ZODMapper(is_train=False))
 
 def setup(args):
     """Setup training configuration."""
@@ -56,13 +56,7 @@ def setup(args):
         os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
     
     default_setup(cfg, args)
-    return cfg
-
-def main(args):
-    """Main training function."""
-    # Dataset registration should be minimal here
-    register_all_zod("/home/appuser/AIdriven/datasets/zod")
-    cfg = setup(args)
+    
     cfg.DATASETS.TRAIN = ("zod_3class_train",)
     cfg.DATASETS.TEST  = ("zod_3class_val",)
     
@@ -75,13 +69,21 @@ def main(args):
     cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 256  # (기본 512)
     cfg.MODEL.RPN.POST_NMS_TOPK_TRAIN = 500         # (기본 1000)
     cfg.MODEL.RPN.POST_NMS_TOPK_TEST  = 1000
-    cfg.MODEL.RESNETS.FREEZE_AT = 2
+    cfg.MODEL.RESNETS.FREEZE_AT = 4
     #cfg.INPUT.MIN_SIZE_TRAIN = (640, 720, 800)
     #cfg.INPUT.MAX_SIZE_TRAIN = 1333
     #cfg.INPUT.MIN_SIZE_TEST  = 800
     #cfg.INPUT.MAX_SIZE_TEST  = 1333
     
-    trainer = ZOD3DTrainer(cfg)
+    return cfg
+
+def main(args):
+    """Main training function."""
+    # Dataset registration should be minimal here
+    register_zod("/home/appuser/AIdriven/datasets/zod")
+    cfg = setup(args)
+
+    trainer = ZODTrainer(cfg)
     trainer.resume_or_load(resume=False)
     trainer.train()
 

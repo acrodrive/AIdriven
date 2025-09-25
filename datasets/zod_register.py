@@ -36,14 +36,14 @@ def _bbox_from_geom_coordinates(obj):
 
 def _bbox_from_simple_with_geom(obj):
     try:
-        orig = globals().get("_bbox_from_simple", None)
+        orig = globals().get("_bbox_from_simple", None) # 여기에서 props로 bbox랑 mode가 아니라 한번에 3dbox와 q rot 가져와야 함
         if callable(orig):
             bbox, mode = orig(obj)
             if bbox and mode is not None:
                 return bbox, mode
     except Exception:
         pass
-    return _bbox_from_geom_coordinates(obj)
+    return _bbox_from_geom_coordinates(obj) # 야 geo로 가져오면 안된다 여기로 들어가면 안됨
 
 def _extract_3d_extras(obj):
     """Return (bbox3d, yaw_sincos) or (None, None)."""
@@ -148,10 +148,10 @@ def _bbox_from_simple(obj):
     # 1) 리스트형 바로 치기
     for key in ("bbox","bbox2d","bbox_xyxy","bbox_xywh","box","rect","box2d"):
         for container in (props, obj):
-            v = container.get(key)
+            v = container.get(key) # 일을 왜 두번하노; ㄹㅈㄷ긴하다 근데 저런 키 존재 안할건데 이거 왜있는거냐? ㄹㅈㄷ긴해
             if isinstance(v, (list,tuple)) and len(v) == 4:
                 return (list(map(float, v)),
-                        BoxMode.XYXY_ABS if _looks_like_xyxy(v) else BoxMode.XYWH_ABS)
+                        BoxMode.XYXY_ABS if _looks_like_xyxy(v) else BoxMode.XYWH_ABS) # 아 mode라는게 bbox가 xyxy로 정의되는지 xywh로 정의되는지 모드구나 근데 아쉽게도 zod는 보통 단순한 직사각형이 아닐텐데 그리고 그럴 목적이면 prop를 가져올게 아니라 geometry를 가져와야 하는데; 일단 처음부터 잘못됨
 
     # 2) 딕트형 바로 치기
     def _from_dict(d):
@@ -177,7 +177,7 @@ def _bbox_from_simple(obj):
             return [x1,y1,x2,y2], BoxMode.XYXY_ABS
         return None
 
-    for key in ("bbox","bbox2d","box2d","box","rect","region","geometry","shape"):
+    for key in ("bbox","bbox2d","box2d","box","rect","region","geometry","shape"): # key로 geometry만 유효한데 다른 애들은 뭐냐; 그리고 geometry 얘는 직사각형 xyxy도 아니고 꼭짓점이어서 그냥 쓰면 안 될텐데 사각형 bbox로 만들려면 → x_min, y_min, x_max, y_max 계산해야 하는데
         for container in (props, obj):
             val = container.get(key)
             # dict로 오는 경우
@@ -201,7 +201,7 @@ def _bbox_from_simple(obj):
                             return bb, (BoxMode.XYXY_ABS if _looks_like_xyxy(bb) else BoxMode.XYWH_ABS)
 
     # 3) 폴리곤류가 있다면 bounding box로 환원
-    for key in ("poly2d","polygon","vertices","points"):
+    for key in ("poly2d","polygon","vertices","points"): # 너는 진짜 뭐냐;
         for container in (props, obj):
             pts = container.get(key)
             if isinstance(pts, (list,tuple)) and len(pts) >= 3:
@@ -233,7 +233,7 @@ def load_zod_simple(ann_files: List[str]) -> List[Dict[str, Any]]:
     good = bad = 0
     img_id = 0
 
-    print(f"[ZOD DEBUG] ann files = {len(ann_files)}")
+    print(f"[ZOD DEBUG] annotation files = {len(ann_files)}")
     for ann_path in ann_files:
         # …/single_frames/<id>/annotations/object_detection.json → <id> 디렉토리
         frame_dir = os.path.dirname(os.path.dirname(ann_path))
@@ -262,36 +262,34 @@ def load_zod_simple(ann_files: List[str]) -> List[Dict[str, Any]]:
             record['width'] = W
         img_id += 1
 
-        for obj in objs:
-            # class/type 는 최상위 또는 properties 밑에 존재 (둘 다 시도)
-            props = obj.get("properties", obj)
-            cls_raw = props.get("class") or props.get("category") or ""
-            typ_raw = props.get("type")  or props.get("subclass")  or ""
+        for obj in objs: # json 파일 열어서 {}를 하나씩 꺼내봄. 하나의 scope 안에 geometry와 properties로 또 나누어짐.
+            props = obj.get("properties", obj) # 주로 알고 싶은 정보는 properties에 존재
+            cls_raw = props.get("class") or props.get("category") or "" # 보통 class에 대분류가 있음
+            typ_raw = props.get("type")  or props.get("subclass")  or "" # 보통 type에 소분류가 있음
 
-            std = _to_std3(cls_raw, typ_raw)
-            if std is None:
-                # car/ped/cyc 외는 드롭
+            std = _to_std3(cls_raw, typ_raw) # 여기에서 3개의 class/type 쌍(car, ped, cyc)을 제외하고 나머지는 무시됨
+            if std is None: # car, ped, cyc 빼고 다 드롭
                 dropped[f"class={_norm(cls_raw)}|type={_norm(typ_raw)}"] += 1
                 continue
 
-            bbox, mode = _bbox_from_simple_with_geom(obj)
+            bbox, mode = _bbox_from_simple_with_geom(obj) # 야 이거 뭐냐; bbox필요없다고 2d는; 근데 여기서 왜 geo랑 prop 둘다 봄? bbox는 geo만 봐라
             if not _bbox_valid(bbox, mode):
                 bad += 1
                 continue
             good += 1
 
             record["annotations"].append({
-                "bbox": bbox,
+                "bbox": bbox, # bbox 없는데 뭔 개솔? 3dbox형태밖에 없는데 얘는 뭘 추출하고 있는거임?;
                 "bbox_mode": mode,
                 "category_id": CAT_TO_ID[std],
-                "iscrowd": int(props.get("iscrowd", 0)),
+                "iscrowd": int(props.get("iscrowd", 0)), # 이거 뭔 개솔?
             })
-            # attach 3D extras when available
-            bbox3d, yaw_sincos = _extract_3d_extras(obj)
+            
+            bbox3d, yaw_sincos = _extract_3d_extras(obj) # 이거지 3D 박스를 뽑아야지; 이거지 이거지 여기서 x, y, z, w, l, h랑 yaw 뽑네 (아마 중심은 차량 전체 부피의 한가운데 일거임)
             if bbox3d is not None and yaw_sincos is not None:
                 record['annotations'][-1]['bbox3d'] = bbox3d
                 record['annotations'][-1]['yaw_sincos'] = yaw_sincos
-            kept[std] += 1
+            kept[std] += 1 # class별로 몇개 뽑혔는지 카운트
 
         if record["annotations"]:
             dataset.append(record)
@@ -303,7 +301,7 @@ def load_zod_simple(ann_files: List[str]) -> List[Dict[str, Any]]:
     print(f"[ZOD DEBUG] built records = {len(dataset)}")
     return dataset
 
-def register_all_zod(zod_root: str): # Detectron2의 DatasetCatalog에 등록함
+def register_zod(zod_root: str): # Detectron2의 DatasetCatalog에 등록함
     assert os.path.isdir(zod_root), f"Invalid zod_root: {zod_root}"
     ann_glob = os.path.join(zod_root, "single_frames", "*", "annotations", "object_detection.json")
     ann_files = sorted(glob.glob(ann_glob))
@@ -319,4 +317,4 @@ def register_all_zod(zod_root: str): # Detectron2의 DatasetCatalog에 등록함
         print(f"[ZOD] Registered {name}")
 
     _safe("zod_3class_train", lambda: load_zod_simple(ann_files)) # 야 이거 누가 만들었냐;
-    _safe("zod_3class_val",   lambda: load_zod_simple(ann_files)) # 7:3으로 분리하던가 해라
+    _safe("zod_3class_val",   lambda: load_zod_simple(ann_files)) # 8:2로 분리하던가 해라
