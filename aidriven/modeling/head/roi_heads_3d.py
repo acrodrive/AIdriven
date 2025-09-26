@@ -18,18 +18,22 @@ class ROIHeads3D(StandardROIHeads):
 
     @classmethod
     def from_config(cls, cfg, input_shape):
-        # 부모가 필요한 키워드 인자들을 모두 구성
         ret = super().from_config(cfg, input_shape)
-        # 우리 predictor 생성에 cfg가 필요하므로 함께 넘겨준다
         ret["cfg"] = cfg
         return ret
 
     @configurable
     def __init__(self, *, cfg=None, **kwargs):
-        # 부모 초기화(여기서 box_pooler/box_head/기본 box_predictor까지 만들어짐)
+        # StandardROIHeads를 상속받음
+        # self.box_head는 기존 head임
         super().__init__(**kwargs)
         assert self.box_head is not None, "box_head must be built by StandardROIHeads"
-        # box predictor만 3D 버전으로 교체
+        
+        # 기존 head의 가중치를 얼림
+        for p in self.box_head.parameters():
+            p.requires_grad = False
+        
+        # custom 3d head 추가
         self.box_predictor = FastRCNN3DOutputLayers(cfg, self.box_head.output_shape)
 
     def _forward_box(self, features, proposals):
@@ -37,18 +41,30 @@ class ROIHeads3D(StandardROIHeads):
         StandardROIHeads._forward_box 규약:
         - self.training == True -> '손실 dict'만 반환
         - self.training == False -> 'pred_instances(Instances)'만 반환
+        
+        features: backbone에서 추출한 다중 스케일 특징맵 (P2, P3, P4, P5)
+        proposals: RPN에서 생성된 객체 후보 영역들
         """
-        box_features = self.box_pooler(
-            [features[f] for f in self.box_in_features],
-            [x.proposal_boxes for x in proposals],
+        # ⭐ head 입력부, box_pooler가 RoIAlign 수행 (proposal 영역에 대해 feature map에서 고정된 크기의 특징 추출)
+        box_features = self.box_pooler( # 여러 해상도의 FPN 특징맵에서 RPN이 제안한 박스마다 고정 크기의 RoI 특징을 잘라오는 연산
+            [features[f] for f in self.box_in_features], # 근데 이제 이미지 특징맵을 넣고
+            [x.proposal_boxes for x in proposals], #RPN에서 생성된 proposals을 넣어서
         )
-        box_features = self.box_head(box_features)  # (sum_props, rep_dim)
 
-        # 3D predictor 호출
+        # box_pooler의 출력은 결과 텐서로 배치 내 모든 proposal을 세로로 이어 붙인 형태임
+        # 차원은 (모든 proposal 개수의 합, 채널 C, pooler_output, pooler_output)
+        # 이미지 픽셀 좌표계를 쓰며, 학습 시에는 proposal에 GT가 매칭된 전경 샘플과 배경 샘플이 섞여 들어옴(❓)
+        # 역전파 시 RoIAlign을 거친 그 레벨의 FPN 피처로 그래디언트가 흐름 (❓)
+
+        # 특징 처리
+        # ⭐ box_head는 이렇게 뽑힌 C×H×W RoI 특징을 상위 표현(❓)으로 변환하는 모듈
+        box_features = self.box_head(box_features)  # (sum_props, rep_dim)
+        # ⭐ box predictor 나야 커스텀 헤드. 근데 class는 왜 뱉니❓; 그리고 추론 된 거 아니야 여기서❓
         pred_class_logits, pred_proposal_deltas, pred_3d = self.box_predictor(box_features)
 
         if self.training:
-            # 반드시 dict만 반환해야 함
+            # 반드시 dict만 반환해야 함 (❓)
+            # ⭐ 손실 계산
             losses = self.box_predictor.losses(
                 (pred_class_logits, pred_proposal_deltas, pred_3d), proposals
             )
@@ -58,10 +74,12 @@ class ROIHeads3D(StandardROIHeads):
             return losses
 
         else:
-            # 평가 모드: 2D는 기존 inference, 3D는 별도 부착
-            pred_instances, _ = self.box_predictor.inference(
+            # 또 추론하는거여❓ 근데 instances가 정확히 뭐야❓
+            pred_instances, _ = self.box_predictor.inference_cls_only(
                 (pred_class_logits, pred_proposal_deltas), proposals
             )
+            
+            # custom head(self.box_predictor)로 
             self.box_predictor.inference_3d(box_features, pred_instances)
             return pred_instances
 
