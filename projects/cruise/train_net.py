@@ -57,8 +57,8 @@ def setup(args):
     
     default_setup(cfg, args)
     
-    cfg.DATASETS.TRAIN = ("zod_3class_train",)
-    cfg.DATASETS.TEST  = ("zod_3class_val",)
+    cfg.DATASETS.TRAIN = ("zod_train",)
+    cfg.DATASETS.TEST  = ("zod_val",)
     
     cfg.SOLVER.IMS_PER_BATCH = 1
     cfg.SOLVER.BASE_LR = 0.0025 * (cfg.SOLVER.IMS_PER_BATCH / 4.0)

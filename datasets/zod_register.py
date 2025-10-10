@@ -111,9 +111,10 @@ def _find_front_image(frame_dir: str) -> Tuple[Optional[str], Optional[int], Opt
 def _norm(s: str) -> str:
     return (s or "").strip().lower().replace(" ", "_")
 
-VEHICLE_TO_CAR = {"car","bus","truck","van","trailer","pickup","suv","jeep","minivan"}
-HUMAN_TO_PED   = {"pedestrian","person","people","human"}
-VULN_TO_CYC    = {"cyclist","bicyclist","bicycle","rider","motorcycle","motorcyclist","kick_scooter","personal_mobility"}
+# see https://zod.zenseact.com/annotations
+VEHICLE_TO_CAR = {"car","van","truck","trailer","bus","heavyequip","tramtrain","other","inconclusive"}
+HUMAN_TO_PED   = {"pedestrian"}
+VULN_TO_CYC    = {"bicycle","motorcycle","personaltransporter","other","inconclusive"}
 
 def _to_std3(cls_raw: str, typ_raw: str) -> Optional[str]:
     cls = _norm(cls_raw)
@@ -122,20 +123,10 @@ def _to_std3(cls_raw: str, typ_raw: str) -> Optional[str]:
     # ZOD 쪽 라벨 예시: class=vehicle / type=car | class=human / type=pedestrian | class=vulnerablevehicle / type=cyclist
     if cls in {"vehicle", "vehicle_object"} and typ in VEHICLE_TO_CAR:
         return "car"
-    if cls in {"human", "pedestrian"} and ((not typ) or (typ in HUMAN_TO_PED)):
+    if cls in {"pedestrian"} and ((not typ) or (typ in HUMAN_TO_PED)):
         return "pedestrian"
-    if cls in {"vulnerablevehicle", "vulnerable_vehicle"} and (typ in VULN_TO_CYC):
+    if cls in {"vulnerablevehicle"} and (typ in VULN_TO_CYC):
         return "cyclist"
-
-    # 보조 판단 (type만으로)
-    if typ in VEHICLE_TO_CAR: return "car"
-    if typ in HUMAN_TO_PED:   return "pedestrian"
-    if typ in VULN_TO_CYC:    return "cyclist"
-
-    # 마지막 보조 (class만으로)
-    if cls in VEHICLE_TO_CAR: return "car"
-    if cls in HUMAN_TO_PED:   return "pedestrian"
-    if cls in VULN_TO_CYC:    return "cyclist"
 
     return None
 
@@ -226,11 +217,11 @@ def _bbox_valid(bbox, mode):
         x1,y1,x2,y2 = bbox; return (x2-x1>0) and (y2-y1>0)
     return False
 
-def load_zod_simple(ann_files: List[str]) -> List[Dict[str, Any]]:
+def extract_dataset_from_annotation(ann_files: List[str]) -> List[Dict[str, Any]]:
     from collections import Counter
     dataset = []
-    kept = Counter(); dropped = Counter()
-    good = bad = 0
+    num_per_class = Counter(); dropped = Counter()
+    num_valid = num_invalid = 0
     img_id = 0
 
     print(f"[ZOD DEBUG] annotation files = {len(ann_files)}")
@@ -267,16 +258,16 @@ def load_zod_simple(ann_files: List[str]) -> List[Dict[str, Any]]:
             cls_raw = props.get("class") or props.get("category") or "" # 보통 class에 대분류가 있음
             typ_raw = props.get("type")  or props.get("subclass")  or "" # 보통 type에 소분류가 있음
 
-            std = _to_std3(cls_raw, typ_raw) # 여기에서 3개의 class/type 쌍(car, ped, cyc)을 제외하고 나머지는 무시됨
+            std = _to_std3(cls_raw, typ_raw) # ⭐ only dynamic object
             if std is None: # car, ped, cyc 빼고 다 드롭
                 dropped[f"class={_norm(cls_raw)}|type={_norm(typ_raw)}"] += 1
                 continue
 
             bbox, mode = _bbox_from_simple_with_geom(obj) # 야 이거 뭐냐; bbox필요없다고 2d는; 근데 여기서 왜 geo랑 prop 둘다 봄? bbox는 geo만 봐라
             if not _bbox_valid(bbox, mode):
-                bad += 1
+                num_invalid += 1
                 continue
-            good += 1
+            num_valid += 1
 
             record["annotations"].append({
                 "bbox": bbox, # bbox 없는데 뭔 개솔? 3dbox형태밖에 없는데 얘는 뭘 추출하고 있는거임?;
@@ -289,13 +280,14 @@ def load_zod_simple(ann_files: List[str]) -> List[Dict[str, Any]]:
             if bbox3d is not None and yaw_sincos is not None:
                 record['annotations'][-1]['bbox3d'] = bbox3d
                 record['annotations'][-1]['yaw_sincos'] = yaw_sincos
-            kept[std] += 1 # class별로 몇개 뽑혔는지 카운트
+            num_per_class[std] += 1 # class별로 몇개 뽑혔는지 카운트
 
         if record["annotations"]:
             dataset.append(record)
 
-    print(f"[ZOD DEBUG] bbox good/bad = {good}/{bad}")
-    print(f"[ZOD DEBUG] kept per-class = {dict(kept)}")
+    print(f"[ZOD DEBUG] valid object = {num_valid}")
+    print(f"[ZOD DEBUG] invalid object due to wrong annotation GT data = {num_invalid}")
+    print(f"[ZOD DEBUG] number per class = {dict(num_per_class)}")
     if dropped:
         print(f"[ZOD DEBUG] dropped top5 = {dropped.most_common(5)}")
     print(f"[ZOD DEBUG] built records = {len(dataset)}")
@@ -303,18 +295,30 @@ def load_zod_simple(ann_files: List[str]) -> List[Dict[str, Any]]:
 
 def register_zod(zod_root: str): # Detectron2의 DatasetCatalog에 등록함
     assert os.path.isdir(zod_root), f"Invalid zod_root: {zod_root}"
-    ann_glob = os.path.join(zod_root, "single_frames", "*", "annotations", "object_detection.json")
-    ann_files = sorted(glob.glob(ann_glob))
-    print(f"[ZOD DEBUG] found ann files: {len(ann_files)} by {ann_glob}")
-    if not ann_files:
-        raise FileNotFoundError(f"No annotation json found by: {ann_glob}")
+    annotation_glob = os.path.join(zod_root, "single_frames", "*", "annotations", "object_detection.json")
+    annotation_files = sorted(glob.glob(annotation_glob))
+    print(f"[ZOD DEBUG] found ann files: {len(annotation_files)} by {annotation_glob}")
+    if not annotation_files:
+        raise FileNotFoundError(f"No annotation json found by: {annotation_glob}")
 
-    def _safe(name, loader):
+    import random
+    # Split ann_files into train and val (80/20)
+    annotation_files = annotation_files[:]  # shallow copy
+    random.seed(42)  # for reproducibility
+    random.shuffle(annotation_files)
+
+    split_idx = int(len(annotation_files) * 0.8)
+    annotation_files_for_training = annotation_files[:split_idx]
+    annotation_files_for_val   = annotation_files[split_idx:]
+
+    print(f"[ZOD DEBUG] train/val split = {len(annotation_files_for_training)}/{len(annotation_files_for_val)}")
+
+    def regist_dataset(name, loader):
         if name in DatasetCatalog.list():
             print(f"[ZOD] skip already-registered: {name}"); return
         DatasetCatalog.register(name, loader)
         MetadataCatalog.get(name).set(thing_classes=THING_CLASSES)
         print(f"[ZOD] Registered {name}")
 
-    _safe("zod_3class_train", lambda: load_zod_simple(ann_files)) # 야 이거 누가 만들었냐;
-    _safe("zod_3class_val",   lambda: load_zod_simple(ann_files)) # 8:2로 분리하던가 해라
+    regist_dataset("zod_train", lambda: extract_dataset_from_annotation(annotation_files_for_training))
+    regist_dataset("zod_val",   lambda: extract_dataset_from_annotation(annotation_files_for_val))
